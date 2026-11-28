@@ -1142,6 +1142,46 @@ it for review?"*, not *"this is wrong, should I fix it?"*
 shows which annotation is repeatedly missing — which is how the certification
 contract (§10.3) learns what to require next.
 
+#### 10.10.3 Code mode — deferred [CALL, C42]
+
+"Code mode" (code execution with MCP) lets an agent write a short script that
+calls tools as a typed code API inside a sandbox, instead of calling each tool
+through the model. It saves tokens in two places: only the tool signatures a
+task needs are loaded, and intermediate results stay in the sandbox rather than
+passing through the model's context.
+
+**Not in v1.** The savings come mostly from large tool catalogs and large
+intermediate results. This design has neither on the governed path:
+
+- **Five tools** (§10.10). Their definitions cost a few hundred tokens; there is
+  little to load on demand.
+- **Results are already shaped server-side.** `run_metric` returns aggregated,
+  capped results under the guardrails; agents never see raw tables, which
+  removes the usual reason to loop over big result sets.
+- **It adds a runtime that runs agent-written code**, which needs its own
+  sandbox, security review, audit coverage, and evals. That cuts against "no
+  free-form code or SQL for agents" (C14) and is real cost for a single DPE.
+
+**Do first instead (cheap token hygiene on the governed service):** short tool
+descriptions; summary-first responses with pagination and row caps; return a
+result handle for large outputs instead of the rows; cache metric definitions
+per context version.
+
+**Revisit triggers.** Reopen this call when any of these holds:
+
+| Trigger | Why code mode then pays |
+|---|---|
+| Agents routinely chain many calls (e.g. `run_metric` per region, then compare) | One script replaces many model round trips |
+| The governed tool surface grows to dozens of tools | Loading definitions on demand starts to matter |
+| The raw-SQL escape hatch (C38) shows high token use from large raw results | Keeping raw rows out of context is the biggest saving, for trusted users |
+
+**If adopted, it stays inside the governed boundary:** the sandbox can reach
+only the governed service (never the engine directly); scripts call the same
+tools through a typed SDK, so department roles, masking, guardrails, and audit
+logging all still apply; it is an optional client mode beside plain MCP, not a
+replacement; evals cover it like any other tool path. Phase placement: Phase 3,
+alongside the MCP adapter, at the earliest.
+
 ### 10.11 Observability and alerting
 
 Checks that page a human with a runbook, not a dashboard nobody watches:
@@ -1317,6 +1357,7 @@ roles is reachable only as an admin.
 | C39 | **Schema-drift policy (additive accept / rename flag / type+removal fail) — logged** | Cheaply |
 | C40 | **Staging `sources.yml` generated from the load-task schema (single definition)** | Cheaply |
 | C41 | **Registry (`products.yml`) + DAG-factory input contract defined; §10.9 and §10.8.1 reconciled** | Cheaply |
+| C42 | **Code mode (code execution over MCP) deferred; cheap server-side token hygiene first; revisit triggers in §10.10.3** | Cheaply |
 
 ---
 
